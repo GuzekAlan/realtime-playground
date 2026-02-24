@@ -14,10 +14,8 @@ import {
   NEXT_PUBLIC_SUPABASE_KEY,
   NEXT_PUBLIC_TEST_USER_EMAIL,
 } from "@/lib/constants";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -28,6 +26,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { ChannelForm } from "@/components/forms/ChannelForm";
+import { ActiveChannels } from "@/components/channels/ActiveChannels";
+import { type ChannelFormValues } from "@/schemas/channel";
 import { useBroadcastMessages } from "@/hooks/useBroadcastMessages";
 import { usePostgresChanges } from "@/hooks/usePostgresChanges";
 import { usePresenceState } from "@/hooks/usePresenceState";
@@ -60,13 +61,6 @@ interface UserInfo {
   password: string;
 }
 
-interface ChannelConfig {
-  private: boolean;
-  broadcast: { ack: boolean; self: boolean };
-  presence: { enabled: boolean; key: string | undefined };
-  postgres_changes: Array<{ event: string; schema: string; table: string }>;
-}
-
 interface PgForm {
   schema: string;
   table: string;
@@ -81,14 +75,6 @@ interface BroadcastForm {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-const channelStateBadgeVariant = (
-  state: string,
-): "default" | "secondary" | "destructive" | "outline" => {
-  if (state === "joined") return "default";
-  if (state === "joining" || state === "leaving") return "secondary";
-  return "outline";
-};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -116,14 +102,6 @@ export default function Home() {
 
   const isAuthenticated = (info: UserInfo) => info.id !== null;
 
-  const [channelName, setChannelName] = useState("");
-  const [channelConfig, setChannelConfig] = useState<ChannelConfig>({
-    private: false,
-    broadcast: { ack: true, self: true },
-    presence: { enabled: true, key: undefined },
-    postgres_changes: [],
-  });
-
   const [pgForm, setPgForm] = useState<PgForm>({
     schema: "public",
     table: "",
@@ -135,7 +113,6 @@ export default function Home() {
     payload: { message: "" },
   });
 
-  const [broadcastEventName, setBroadcastEventName] = useState("*");
   const [presencePayload, setPresencePayload] = useState<
     Record<string, unknown>
   >({});
@@ -237,32 +214,14 @@ export default function Home() {
   };
 
   // Channel management
-  const createChannel = () => {
-    if (!channelName.trim()) {
-      toast.warning("Please enter a channel name");
-      return;
-    }
-    if (socketInfo.channels.has(channelName)) {
-      toast.warning(`Channel "${channelName}" already exists`);
+  const createChannel = ({ name, config }: ChannelFormValues) => {
+    if (socketInfo.channels.has(name)) {
+      toast.warning(`Channel "${name}" already exists`);
       return;
     }
 
-    const config = { config: channelConfig };
-    console.log("---- config", config);
-
-    const ch = window.socket.channel(channelName, config);
-    // eslint-disable-next-line react-hooks/immutability
+    const ch = window.socket.channel(name, { config });
     window.channel = ch;
-
-    channelConfig.postgres_changes.forEach(({ event, schema, table }) => {
-      addPostgresChangesListener(
-        ch,
-        channelName,
-        event as REALTIME_POSTGRES_CHANGES_LISTEN_EVENT,
-        schema,
-        table,
-      );
-    });
 
     ch.on("system", {}, (payload) => {
       const message = `[SYSTEM] ${payload.message}`;
@@ -294,10 +253,6 @@ export default function Home() {
     channel: RealtimeChannel,
     channelNameParam: string,
   ) => {
-    if (!channelConfig.presence.enabled) {
-      toast.warning("Presence is not enabled for this channel");
-      return;
-    }
     registerPresenceListener(channel, channelNameParam);
     updateChannels();
   };
@@ -512,270 +467,17 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            {/* Create Channel */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Create Channel</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="space-y-1">
-                  <Label>Channel Name</Label>
-                  <Input
-                    placeholder="e.g., my-room, game-lobby, chat-1"
-                    value={channelName}
-                    onChange={(e) => setChannelName(e.target.value)}
-                  />
-                  <div className="flex items-center gap-2 mt-2">
-                    <Checkbox
-                      id="private"
-                      checked={channelConfig.private}
-                      onCheckedChange={(checked) =>
-                        setChannelConfig((prev) => ({
-                          ...prev,
-                          private: checked === true,
-                        }))
-                      }
-                    />
-                    <Label
-                      htmlFor="private"
-                      className="font-normal text-muted-foreground"
-                    >
-                      Private channel
-                    </Label>
-                  </div>
-                </div>
+            <ChannelForm onSubmit={createChannel} />
 
-                <div className="border-t pt-3 space-y-3">
-                  {/* Broadcast config */}
-                  <div className="rounded-md border border-blue-600/30 bg-blue-950/20 p-3 space-y-2">
-                    <p className="text-xs font-semibold text-blue-400">
-                      Broadcast Configuration
-                    </p>
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id="bc-ack"
-                          checked={channelConfig.broadcast.ack}
-                          onCheckedChange={(checked) =>
-                            setChannelConfig((prev) => ({
-                              ...prev,
-                              broadcast: {
-                                ...prev.broadcast,
-                                ack: checked === true,
-                              },
-                            }))
-                          }
-                        />
-                        <Label
-                          htmlFor="bc-ack"
-                          className="font-normal text-xs text-muted-foreground"
-                        >
-                          Send acknowledgments (ack)
-                        </Label>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id="bc-self"
-                          checked={channelConfig.broadcast.self}
-                          onCheckedChange={(checked) =>
-                            setChannelConfig((prev) => ({
-                              ...prev,
-                              broadcast: {
-                                ...prev.broadcast,
-                                self: checked === true,
-                              },
-                            }))
-                          }
-                        />
-                        <Label
-                          htmlFor="bc-self"
-                          className="font-normal text-xs text-muted-foreground"
-                        >
-                          Receive own messages (self)
-                        </Label>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Presence config */}
-                  <div className="rounded-md border border-green-600/30 bg-green-950/20 p-3 space-y-2">
-                    <p className="text-xs font-semibold text-green-400">
-                      Presence Configuration
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <Checkbox
-                        id="presence-enabled"
-                        checked={channelConfig.presence.enabled}
-                        onCheckedChange={(checked) =>
-                          setChannelConfig((prev) => ({
-                            ...prev,
-                            presence: {
-                              ...prev.presence,
-                              enabled: checked === true,
-                            },
-                          }))
-                        }
-                      />
-                      <Label
-                        htmlFor="presence-enabled"
-                        className="font-normal text-xs text-muted-foreground"
-                      >
-                        Enable presence tracking
-                      </Label>
-                    </div>
-                    {channelConfig.presence.enabled && (
-                      <div className="space-y-1">
-                        <Label className="text-xs">
-                          Presence Key (optional)
-                        </Label>
-                        <Input
-                          placeholder="e.g., user-id"
-                          value={channelConfig.presence.key ?? ""}
-                          onChange={(e) =>
-                            setChannelConfig((prev) => ({
-                              ...prev,
-                              presence: {
-                                ...prev.presence,
-                                key: e.target.value,
-                              },
-                            }))
-                          }
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Postgres note */}
-                  <div className="rounded-md border border-purple-600/30 bg-purple-950/20 p-3">
-                    <p className="text-xs text-purple-300">
-                      Configure listeners after subscribing to the channel using
-                      the configuration section below.
-                    </p>
-                  </div>
-                </div>
-
-                <Button className="w-full" onClick={createChannel}>
-                  Create Channel
-                </Button>
-              </CardContent>
-            </Card>
-
-            {/* Active Channels */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Active Channels</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {socketInfo.channels.size === 0 ? (
-                  <div className="text-center py-6 border border-dashed rounded-md">
-                    <p className="text-muted-foreground text-xs">
-                      No channels created yet
-                    </p>
-                    <p className="text-muted-foreground/60 text-xs mt-1">
-                      Create a channel above to get started
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="rounded-md border border-blue-600/30 bg-blue-950/20 p-3 space-y-1">
-                      <Label className="text-xs">
-                        Broadcast Event Name (for listener)
-                      </Label>
-                      <Input
-                        placeholder="* for all events, or specific event name"
-                        value={broadcastEventName}
-                        onChange={(e) => setBroadcastEventName(e.target.value)}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Use * to listen to all broadcast events, or enter a
-                        specific event name
-                      </p>
-                    </div>
-
-                    {Array.from(socketInfo.channels.entries()).map(
-                      ([name, channel]) => (
-                        <div
-                          key={name}
-                          className="rounded-md border p-3 space-y-2"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-semibold text-xs truncate">
-                              {name}
-                            </span>
-                            <Badge
-                              variant={channelStateBadgeVariant(channel.state)}
-                            >
-                              {channel.state}
-                            </Badge>
-                          </div>
-                          <div className="flex gap-1 flex-wrap">
-                            {channel.state !== "joined" && (
-                              <Button
-                                size="sm"
-                                variant="secondary"
-                                className="text-xs h-7"
-                                onClick={() => subscribeToChannel(name)}
-                              >
-                                Subscribe
-                              </Button>
-                            )}
-                            {channel.state === "joined" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-xs h-7"
-                                onClick={() => unsubscribeFromChannel(name)}
-                              >
-                                Unsubscribe
-                              </Button>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="text-xs h-7"
-                              onClick={() =>
-                                addBroadcastListener(
-                                  channel,
-                                  name,
-                                  broadcastEventName || "*",
-                                )
-                              }
-                            >
-                              📡 Broadcast Listener ({broadcastEventName || "*"}
-                              )
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="text-xs h-7"
-                              onClick={() => addPresenceListener(channel, name)}
-                            >
-                              👥 Presence Listener
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="text-xs h-7"
-                              onClick={() => untrackPresence(name)}
-                            >
-                              👤 Untrack
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              className="text-xs h-7"
-                              onClick={() => removeChannel(name)}
-                            >
-                              ✕ Remove
-                            </Button>
-                          </div>
-                        </div>
-                      ),
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <ActiveChannels
+              channels={socketInfo.channels}
+              onSubscribe={subscribeToChannel}
+              onUnsubscribe={unsubscribeFromChannel}
+              onRemove={removeChannel}
+              onAddBroadcastListener={addBroadcastListener}
+              onAddPresenceListener={addPresenceListener}
+              onUntrack={untrackPresence}
+            />
 
             {/* Postgres Changes Config */}
             <Card>
