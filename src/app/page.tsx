@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   RealtimeClient,
   RealtimeChannel,
@@ -94,9 +95,6 @@ const channelStateBadgeVariant = (
 // ---------------------------------------------------------------------------
 
 export default function Home() {
-  const [error, setError] = useState<string | null>(null);
-  const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [socketInfo, setSocketInfo] = useState<SocketInfo>({
     status: "closed",
     channels: new Map(),
@@ -109,21 +107,6 @@ export default function Home() {
     );
     setSocketInfo((prev) => ({ ...prev, channels }));
   };
-
-  const showError = (message: string) => {
-    setError(message);
-    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
-    errorTimeoutRef.current = setTimeout(() => {
-      setError(null);
-      errorTimeoutRef.current = null;
-    }, 5000);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
-    };
-  }, []);
 
   const [userInfo, setUserInfo] = useState<UserInfo>({
     id: null,
@@ -215,7 +198,7 @@ export default function Home() {
   // Authentication
   const handleLogin = async () => {
     if (!userInfo.email || !userInfo.password) {
-      showError("Please enter both email and password");
+      toast.warning("Please enter both email and password");
       return;
     }
 
@@ -225,7 +208,7 @@ export default function Home() {
     });
 
     if (error) {
-      showError(`Login failed: ${error.message}`);
+      toast.error(`Login failed: ${error.message}`);
       return;
     }
 
@@ -256,11 +239,11 @@ export default function Home() {
   // Channel management
   const createChannel = () => {
     if (!channelName.trim()) {
-      showError("Please enter a channel name");
+      toast.warning("Please enter a channel name");
       return;
     }
     if (socketInfo.channels.has(channelName)) {
-      showError(`Channel ${channelName} already exists`);
+      toast.warning(`Channel "${channelName}" already exists`);
       return;
     }
 
@@ -282,7 +265,17 @@ export default function Home() {
     });
 
     ch.on("system", {}, (payload) => {
-      showError(`[SYSTEM] ${JSON.stringify(payload)}`);
+      const message = `[SYSTEM] ${payload.message}`;
+      switch (payload.status) {
+        case "ok":
+          toast.success(message);
+          break;
+        case "error":
+          toast.error(message);
+          break;
+        default:
+          toast.error(message);
+      }
     });
 
     updateChannels();
@@ -302,7 +295,7 @@ export default function Home() {
     channelNameParam: string,
   ) => {
     if (!channelConfig.presence.enabled) {
-      setError("Presence is not enabled for this channel");
+      toast.warning("Presence is not enabled for this channel");
       return;
     }
     registerPresenceListener(channel, channelNameParam);
@@ -326,18 +319,18 @@ export default function Home() {
   ) => {
     const channel = socketInfo.channels.get(name);
     if (!channel) {
-      showError(`[SUBSCRIBE] Channel ${name} not found`);
+      toast.error(`[SUBSCRIBE] Channel ${name} not found`);
       return;
     }
 
     channel.subscribe((status, err) => {
       if (!err && status === "SUBSCRIBED" && trackPayload) {
         channel.track(trackPayload).catch((e: Error) => {
-          showError(`[TRACK] Error tracking presence: ${e.message}`);
+          toast.error(`[TRACK] Error tracking presence: ${e.message}`);
         });
       }
       if (err) {
-        showError(
+        toast.error(
           `[SUBSCRIBE] Error subscribing to channel ${name}: ${err.message}`,
         );
       }
@@ -348,7 +341,7 @@ export default function Home() {
   const unsubscribeFromChannel = (name: string) => {
     const channel = socketInfo.channels.get(name);
     if (!channel) {
-      showError(`[UNSUBSCRIBE] Channel ${name} not found`);
+      toast.error(`[UNSUBSCRIBE] Channel ${name} not found`);
       return;
     }
     channel.unsubscribe();
@@ -358,7 +351,7 @@ export default function Home() {
   const removeChannel = (name: string) => {
     const channel = socketInfo.channels.get(name);
     if (!channel) {
-      showError(`[REMOVE] Channel ${name} not found`);
+      toast.error(`[REMOVE] Channel ${name} not found`);
       return;
     }
     channel.unsubscribe();
@@ -368,7 +361,7 @@ export default function Home() {
   const sendBroadcast = (name: string) => {
     const channel = socketInfo.channels.get(name);
     if (!channel) {
-      showError(`[SEND_BROADCAST] Channel ${name} not found`);
+      toast.error(`[SEND_BROADCAST] Channel ${name} not found`);
       return;
     }
     channel.send({
@@ -381,7 +374,7 @@ export default function Home() {
   const trackPresence = (name: string) => {
     const channel = socketInfo.channels.get(name);
     if (!channel) {
-      showError(`[TRACK_PRESENCE] Channel ${name} not found`);
+      toast.error(`[TRACK_PRESENCE] Channel ${name} not found`);
       return;
     }
     channel.track(presencePayload);
@@ -390,7 +383,7 @@ export default function Home() {
   const untrackPresence = (name: string) => {
     const channel = socketInfo.channels.get(name);
     if (!channel) {
-      showError(`[UNTRACK_PRESENCE] Channel ${name} not found`);
+      toast.error(`[UNTRACK_PRESENCE] Channel ${name} not found`);
       return;
     }
     channel.untrack();
@@ -996,26 +989,6 @@ export default function Home() {
           </div>
         </div>
       </div>
-
-      {/* Error Toast — bottom left */}
-      {error && (
-        <div className="fixed bottom-4 left-4 z-50 max-w-md rounded-lg bg-destructive text-destructive-foreground px-4 py-3 shadow-lg">
-          <div className="flex items-start gap-3">
-            <span className="text-lg">⚠️</span>
-            <div className="flex-1">
-              <p className="text-sm font-semibold mb-1">Error</p>
-              <p className="text-xs">{error}</p>
-            </div>
-            <button
-              onClick={() => setError(null)}
-              className="hover:opacity-70 transition-opacity"
-              title="Dismiss"
-            >
-              ✕
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
