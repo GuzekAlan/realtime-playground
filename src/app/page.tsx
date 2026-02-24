@@ -26,15 +26,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { useBroadcastMessages } from "@/hooks/useBroadcastMessages";
+import { usePostgresChanges } from "@/hooks/usePostgresChanges";
+import { usePresenceState } from "@/hooks/usePresenceState";
+import {
+  BroadcastMessagesTable,
+  PostgresChangesTable,
+  PresenceStateTable,
+} from "@/components/tables";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -75,24 +75,6 @@ interface PgForm {
 interface BroadcastForm {
   event: string;
   payload: Record<string, unknown>;
-}
-
-interface BroadcastMessage {
-  timestamp: string;
-  channel: string;
-  event: string;
-  payload: Record<string, unknown>;
-}
-
-interface PostgresChange {
-  timestamp: string;
-  channel: string;
-  eventType?: string;
-  event?: string;
-  table?: string;
-  new?: Record<string, unknown>;
-  old?: Record<string, unknown>;
-  [key: string]: unknown;
 }
 
 // ---------------------------------------------------------------------------
@@ -175,13 +157,23 @@ export default function Home() {
     Record<string, unknown>
   >({});
 
-  const [broadcastMessages, setBroadcastMessages] = useState<
-    BroadcastMessage[]
-  >([]);
-  const [postgresChanges, setPostgresChanges] = useState<PostgresChange[]>([]);
-  const [presenceState, setPresenceState] = useState<
-    Record<string, Record<string, unknown[]>>
-  >({});
+  const {
+    messages: broadcastMessages,
+    addListener: registerBroadcastListener,
+    clear: clearBroadcastMessages,
+  } = useBroadcastMessages();
+
+  const {
+    changes: postgresChanges,
+    addListener: registerPostgresListener,
+    clear: clearPostgresChanges,
+  } = usePostgresChanges();
+
+  const {
+    presenceState,
+    addListener: registerPresenceListener,
+    clear: clearPresenceState,
+  } = usePresenceState();
 
   // Initialize socket and supabase client
   useEffect(() => {
@@ -301,27 +293,7 @@ export default function Home() {
     channelNameParam: string,
     event: string,
   ) => {
-    channel.on(
-      "broadcast",
-      { event: event || "*" },
-      ({
-        event: ev,
-        payload,
-      }: {
-        event: string;
-        payload: Record<string, unknown>;
-      }) => {
-        setBroadcastMessages((prev) => [
-          ...prev,
-          {
-            timestamp: new Date().toISOString(),
-            channel: channelNameParam,
-            event: ev,
-            payload,
-          },
-        ]);
-      },
-    );
+    registerBroadcastListener(channel, channelNameParam, event);
     updateChannels();
   };
 
@@ -333,18 +305,7 @@ export default function Home() {
       setError("Presence is not enabled for this channel");
       return;
     }
-    const syncState = () => {
-      setPresenceState((prev) => ({
-        ...prev,
-        [channelNameParam]: channel.presenceState() as Record<
-          string,
-          unknown[]
-        >,
-      }));
-    };
-    channel.on("presence", { event: "sync" }, syncState);
-    channel.on("presence", { event: "join" }, syncState);
-    channel.on("presence", { event: "leave" }, syncState);
+    registerPresenceListener(channel, channelNameParam);
     updateChannels();
   };
 
@@ -355,16 +316,7 @@ export default function Home() {
     schema: string,
     table: string,
   ) => {
-    channel.on("postgres_changes", { event, schema, table }, (payload) => {
-      setPostgresChanges((prev) => [
-        ...prev,
-        {
-          timestamp: new Date().toISOString(),
-          channel: channelNameParam,
-          ...(payload as object),
-        },
-      ]);
-    });
+    registerPostgresListener(channel, channelNameParam, event, schema, table);
     updateChannels();
   };
 
@@ -1029,181 +981,18 @@ export default function Home() {
           {/* Right Column: Data Tables                                        */}
           {/* ---------------------------------------------------------------- */}
           <div className="space-y-4">
-            {/* Broadcast Messages */}
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">
-                    Broadcast Messages
-                  </CardTitle>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-xs h-7"
-                    onClick={() => setBroadcastMessages([])}
-                  >
-                    Clear
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {broadcastMessages.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-4 text-xs">
-                    No broadcast messages yet
-                  </p>
-                ) : (
-                  <div className="overflow-auto max-h-96">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="text-xs w-24">Time</TableHead>
-                          <TableHead className="text-xs">Channel</TableHead>
-                          <TableHead className="text-xs">Event</TableHead>
-                          <TableHead className="text-xs">Payload</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {broadcastMessages.map((msg, idx) => (
-                          <TableRow key={idx}>
-                            <TableCell className="text-xs whitespace-nowrap align-top">
-                              {new Date(msg.timestamp).toLocaleTimeString()}
-                            </TableCell>
-                            <TableCell className="text-xs align-top">
-                              {msg.channel}
-                            </TableCell>
-                            <TableCell className="text-xs align-top">
-                              {msg.event}
-                            </TableCell>
-                            <TableCell className="text-xs align-top">
-                              <pre className="overflow-x-auto">
-                                {JSON.stringify(msg.payload, null, 2)}
-                              </pre>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Postgres Changes */}
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Postgres Changes</CardTitle>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-xs h-7"
-                    onClick={() => setPostgresChanges([])}
-                  >
-                    Clear
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {postgresChanges.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-4 text-xs">
-                    No postgres changes yet
-                  </p>
-                ) : (
-                  <div className="overflow-auto max-h-96">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="text-xs w-24">Time</TableHead>
-                          <TableHead className="text-xs">Channel</TableHead>
-                          <TableHead className="text-xs">Event</TableHead>
-                          <TableHead className="text-xs">Table</TableHead>
-                          <TableHead className="text-xs">Data</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {postgresChanges.map((change, idx) => (
-                          <TableRow key={idx}>
-                            <TableCell className="text-xs whitespace-nowrap align-top">
-                              {new Date(change.timestamp).toLocaleTimeString()}
-                            </TableCell>
-                            <TableCell className="text-xs align-top">
-                              {change.channel}
-                            </TableCell>
-                            <TableCell className="text-xs align-top">
-                              {change.eventType ?? change.event}
-                            </TableCell>
-                            <TableCell className="text-xs align-top">
-                              {change.table}
-                            </TableCell>
-                            <TableCell className="text-xs align-top">
-                              <pre className="overflow-x-auto">
-                                {JSON.stringify(
-                                  change.new ?? change.old ?? change,
-                                  null,
-                                  2,
-                                )}
-                              </pre>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Presence State */}
-            <Card>
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">Presence State</CardTitle>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="text-xs h-7"
-                    onClick={() => setPresenceState({})}
-                  >
-                    Clear
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {Object.keys(presenceState).length === 0 ? (
-                  <p className="text-muted-foreground text-center py-4 text-xs">
-                    No presence data yet
-                  </p>
-                ) : (
-                  <div className="space-y-3 max-h-96 overflow-y-auto">
-                    {Object.entries(presenceState).map(([channel, state]) => (
-                      <div key={channel} className="rounded-md border p-3">
-                        <h3 className="font-semibold text-xs mb-2">
-                          {channel}
-                        </h3>
-                        <div className="space-y-2">
-                          {Object.entries(state).map(([key, presences]) => (
-                            <div key={key} className="rounded bg-muted p-2">
-                              <p className="font-semibold text-xs mb-1">
-                                User: {key}
-                              </p>
-                              {Array.isArray(presences) &&
-                                presences.map((presence, i) => (
-                                  <pre
-                                    key={i}
-                                    className="text-xs overflow-x-auto"
-                                  >
-                                    {JSON.stringify(presence, null, 2)}
-                                  </pre>
-                                ))}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <BroadcastMessagesTable
+              messages={broadcastMessages}
+              onClear={clearBroadcastMessages}
+            />
+            <PostgresChangesTable
+              changes={postgresChanges}
+              onClear={clearPostgresChanges}
+            />
+            <PresenceStateTable
+              presenceState={presenceState}
+              onClear={clearPresenceState}
+            />
           </div>
         </div>
       </div>
