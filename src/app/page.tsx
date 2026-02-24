@@ -30,10 +30,12 @@ import { ChannelForm } from "@/components/forms/ChannelForm";
 import { ActiveChannels } from "@/components/channels/ActiveChannels";
 import { type ChannelFormValues } from "@/schemas/channel";
 import { useBroadcastMessages } from "@/hooks/useBroadcastMessages";
+import { useLogMessages } from "@/hooks/useLogMessages";
 import { usePostgresChanges } from "@/hooks/usePostgresChanges";
 import { usePresenceState } from "@/hooks/usePresenceState";
 import {
   BroadcastMessagesTable,
+  LogsTable,
   PostgresChangesTable,
   PresenceStateTable,
 } from "@/components/tables";
@@ -117,6 +119,8 @@ export default function Home() {
     Record<string, unknown>
   >({});
 
+  const { logs, addLog, clear: clearLogs } = useLogMessages();
+
   const {
     messages: broadcastMessages,
     addListener: registerBroadcastListener,
@@ -140,9 +144,7 @@ export default function Home() {
     window.socket = new RealtimeClient(NEXT_PUBLIC_REALTIME_URL, {
       params: { apikey: NEXT_PUBLIC_SUPABASE_KEY },
       worker: true,
-      logger: (kind: string, msg: string, data: unknown) => {
-        console.log(`[${kind}] ${msg}`, data);
-      },
+      logger: addLog,
     });
 
     window.supabase = createClient(
@@ -153,7 +155,7 @@ export default function Home() {
     return () => {
       if (window.socket) window.socket.disconnect();
     };
-  }, []);
+  }, [addLog]);
 
   // Monitor WebSocket connection status
   useEffect(() => {
@@ -676,6 +678,7 @@ export default function Home() {
           {/* Right Column: Data Tables                                        */}
           {/* ---------------------------------------------------------------- */}
           <div className="space-y-4">
+            <LogsTable logs={logs} onClear={clearLogs} />
             <BroadcastMessagesTable
               messages={broadcastMessages}
               onClear={clearBroadcastMessages}

@@ -30,3 +30,14 @@ export type PostgresChange = RealtimePostgresChangesPayload<
 
 /** Outer key = channel name; inner key = presence key; value = presence objects */
 export type PresenceByChannel = Record<string, Record<string, unknown[]>>;
+
+// ---------------------------------------------------------------------------
+// Logs
+// ---------------------------------------------------------------------------
+
+export interface LogEntry {
+  timestamp: string;
+  kind: string;
+  message: string;
+  data: Record<string, unknown> | undefined;
+}
