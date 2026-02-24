@@ -25,6 +25,14 @@ export const channelFormSchema = z.object({
 export type ChannelFormValues = z.infer<typeof channelFormSchema>;
 export type ChannelConfig = z.infer<typeof channelConfigSchema>;
 
+export const broadcastSendSchema = z.object({
+  event: z.string().min(1, "Event is required"),
+  channel: z.string().min(1, "Select a channel"),
+  message: z.string(),
+});
+
+export type BroadcastSendValues = z.infer<typeof broadcastSendSchema>;
+
 // Compile-time guarantee that our config is assignable to the supabase type
 type _Check = ChannelConfig extends RealtimeChannelOptions["config"]
   ? true

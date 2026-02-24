@@ -9,14 +9,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { BroadcastSendForm } from "@/components/forms/BroadcastSendForm";
 import type { BroadcastMessage } from "@/types/realtime";
 
 interface Props {
   messages: BroadcastMessage[];
   onClear: () => void;
+  channels: string[];
 }
 
-export function BroadcastMessagesTable({ messages, onClear }: Props) {
+export function BroadcastMessagesTable({ messages, onClear, channels }: Props) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -38,7 +40,9 @@ export function BroadcastMessagesTable({ messages, onClear }: Props) {
           </div>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-3">
+        <BroadcastSendForm channels={channels} />
+
         {messages.length === 0 ? (
           <p className="text-muted-foreground text-center py-4 text-xs">
             No broadcast messages yet

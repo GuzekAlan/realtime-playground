@@ -69,11 +69,6 @@ interface PgForm {
   event: string;
 }
 
-interface BroadcastForm {
-  event: string;
-  payload: Record<string, unknown>;
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -108,11 +103,6 @@ export default function Home() {
     schema: "public",
     table: "",
     event: "*",
-  });
-
-  const [broadcastForm, setBroadcastForm] = useState<BroadcastForm>({
-    event: "message",
-    payload: { message: "" },
   });
 
   const [presencePayload, setPresencePayload] = useState<
@@ -313,19 +303,6 @@ export default function Home() {
     }
     channel.unsubscribe();
     updateChannels();
-  };
-
-  const sendBroadcast = (name: string) => {
-    const channel = socketInfo.channels.get(name);
-    if (!channel) {
-      toast.error(`[SEND_BROADCAST] Channel ${name} not found`);
-      return;
-    }
-    channel.send({
-      type: "broadcast",
-      event: broadcastForm.event.trim() || "*",
-      payload: broadcastForm.payload || {},
-    });
   };
 
   const trackPresence = (name: string) => {
@@ -559,72 +536,6 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            {/* Broadcast Send */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Broadcast Send</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="space-y-1">
-                  <Label>Event Name</Label>
-                  <Input
-                    placeholder="e.g., message, user-joined, game-update"
-                    value={broadcastForm.event}
-                    onChange={(e) =>
-                      setBroadcastForm((prev) => ({
-                        ...prev,
-                        event: e.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label>Payload (JSON format)</Label>
-                  <Textarea
-                    placeholder='{"message": "Hello!", "user": "Alice"}'
-                    className="font-mono text-xs"
-                    rows={3}
-                    defaultValue={JSON.stringify(
-                      broadcastForm.payload,
-                      null,
-                      2,
-                    )}
-                    onChange={(e) => {
-                      try {
-                        const payload = JSON.parse(e.target.value);
-                        setBroadcastForm((prev) => ({ ...prev, payload }));
-                      } catch {
-                        // Allow typing invalid JSON temporarily
-                      }
-                    }}
-                  />
-                </div>
-                <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {subscribedChannels.length === 0 ? (
-                    <div className="text-center py-3 border border-dashed rounded-md">
-                      <p className="text-muted-foreground text-xs">
-                        No subscribed channels
-                      </p>
-                      <p className="text-muted-foreground/60 text-xs">
-                        Subscribe to a channel first
-                      </p>
-                    </div>
-                  ) : (
-                    subscribedChannels.map(([key]) => (
-                      <Button
-                        key={key}
-                        className="w-full justify-start text-xs"
-                        variant="secondary"
-                        onClick={() => sendBroadcast(key)}
-                      >
-                        📡 Send to: {key}
-                      </Button>
-                    ))
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
             {/* Presence Track */}
             <Card>
               <CardHeader className="pb-2">
@@ -682,6 +593,7 @@ export default function Home() {
             <BroadcastMessagesTable
               messages={broadcastMessages}
               onClear={clearBroadcastMessages}
+              channels={subscribedChannels.map(([key]) => key)}
             />
             <PostgresChangesTable
               changes={postgresChanges}
