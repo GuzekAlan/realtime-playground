@@ -15,10 +15,9 @@ import type { BroadcastMessage } from "@/types/realtime";
 interface Props {
   messages: BroadcastMessage[];
   onClear: () => void;
-  channels: string[];
 }
 
-export function BroadcastMessagesTable({ messages, onClear, channels }: Props) {
+export function BroadcastMessagesTable({ messages, onClear }: Props) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -41,7 +40,7 @@ export function BroadcastMessagesTable({ messages, onClear, channels }: Props) {
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
-        <BroadcastSendForm channels={channels} />
+        <BroadcastSendForm />
 
         {messages.length === 0 ? (
           <p className="text-muted-foreground text-center py-4 text-xs">

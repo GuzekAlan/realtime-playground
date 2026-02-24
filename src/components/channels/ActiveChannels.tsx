@@ -1,25 +1,16 @@
 "use client";
 
 import { useState } from "react";
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useRealtimeStore } from "@/store/realtimeStore";
 
 interface Props {
-  channels: Map<string, RealtimeChannel>;
-  onSubscribe: (name: string) => void;
-  onUnsubscribe: (name: string) => void;
-  onRemove: (name: string) => void;
-  onAddBroadcastListener: (
-    channel: RealtimeChannel,
-    name: string,
-    event: string,
-  ) => void;
-  onAddPresenceListener: (channel: RealtimeChannel, name: string) => void;
-  onUntrack: (name: string) => void;
+  onAddBroadcastListener: (name: string, event: string) => void;
+  onAddPresenceListener: (name: string) => void;
 }
 
 const channelStateBadgeVariant = (
@@ -31,14 +22,10 @@ const channelStateBadgeVariant = (
 };
 
 export function ActiveChannels({
-  channels,
-  onSubscribe,
-  onUnsubscribe,
-  onRemove,
   onAddBroadcastListener,
   onAddPresenceListener,
-  onUntrack,
 }: Props) {
+  const channels = useRealtimeStore((s) => s.channels);
   const [broadcastEventName, setBroadcastEventName] = useState("*");
 
   return (
@@ -87,7 +74,9 @@ export function ActiveChannels({
                       size="sm"
                       variant="secondary"
                       className="text-xs h-7"
-                      onClick={() => onSubscribe(name)}
+                      onClick={() =>
+                        useRealtimeStore.getState().subscribe(name)
+                      }
                     >
                       Subscribe
                     </Button>
@@ -97,7 +86,9 @@ export function ActiveChannels({
                       size="sm"
                       variant="outline"
                       className="text-xs h-7"
-                      onClick={() => onUnsubscribe(name)}
+                      onClick={() =>
+                        useRealtimeStore.getState().unsubscribe(name)
+                      }
                     >
                       Unsubscribe
                     </Button>
@@ -107,11 +98,7 @@ export function ActiveChannels({
                     variant="secondary"
                     className="text-xs h-7"
                     onClick={() =>
-                      onAddBroadcastListener(
-                        channel,
-                        name,
-                        broadcastEventName || "*",
-                      )
+                      onAddBroadcastListener(name, broadcastEventName || "*")
                     }
                   >
                     📡 Broadcast Listener ({broadcastEventName || "*"})
@@ -120,7 +107,7 @@ export function ActiveChannels({
                     size="sm"
                     variant="secondary"
                     className="text-xs h-7"
-                    onClick={() => onAddPresenceListener(channel, name)}
+                    onClick={() => onAddPresenceListener(name)}
                   >
                     👥 Presence Listener
                   </Button>
@@ -128,7 +115,9 @@ export function ActiveChannels({
                     size="sm"
                     variant="secondary"
                     className="text-xs h-7"
-                    onClick={() => onUntrack(name)}
+                    onClick={() =>
+                      useRealtimeStore.getState().untrackPresence(name)
+                    }
                   >
                     👤 Untrack
                   </Button>
@@ -136,7 +125,9 @@ export function ActiveChannels({
                     size="sm"
                     variant="destructive"
                     className="text-xs h-7"
-                    onClick={() => onRemove(name)}
+                    onClick={() =>
+                      useRealtimeStore.getState().removeChannel(name)
+                    }
                   >
                     ✕ Remove
                   </Button>

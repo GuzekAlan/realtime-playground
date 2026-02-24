@@ -2,18 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import {
-  RealtimeClient,
-  RealtimeChannel,
-  createClient,
-  REALTIME_POSTGRES_CHANGES_LISTEN_EVENT,
-} from "@supabase/supabase-js";
-import {
-  NEXT_PUBLIC_SUPABASE_URL,
-  NEXT_PUBLIC_REALTIME_URL,
-  NEXT_PUBLIC_SUPABASE_KEY,
-  NEXT_PUBLIC_TEST_USER_EMAIL,
-} from "@/lib/constants";
+import { REALTIME_POSTGRES_CHANGES_LISTEN_EVENT } from "@supabase/supabase-js";
+import { NEXT_PUBLIC_TEST_USER_EMAIL } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -39,29 +29,8 @@ import {
   PostgresChangesTable,
   PresenceStateTable,
 } from "@/components/tables";
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-declare global {
-  interface Window {
-    socket: RealtimeClient;
-    supabase: ReturnType<typeof createClient>;
-    channel: RealtimeChannel;
-  }
-}
-
-interface SocketInfo {
-  status: "closed" | "connecting" | "open" | "closing";
-  channels: Map<string, RealtimeChannel>;
-}
-
-interface UserInfo {
-  id: string | null;
-  email: string;
-  password: string;
-}
+import { useRealtimeStore } from "@/store/realtimeStore";
+import { useSupabaseStore } from "@/store/supabaseStore";
 
 interface PgForm {
   schema: string;
@@ -69,35 +38,14 @@ interface PgForm {
   event: string;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
 export default function Home() {
-  const [socketInfo, setSocketInfo] = useState<SocketInfo>({
-    status: "closed",
-    channels: new Map(),
-  });
+  const status = useRealtimeStore((s) => s.status);
+  const channels = useRealtimeStore((s) => s.channels);
 
-  const updateChannels = () => {
-    const currentChannels = window.socket.getChannels();
-    const channels = new Map<string, RealtimeChannel>(
-      currentChannels.map((channel) => [channel.subTopic, channel]),
-    );
-    setSocketInfo((prev) => ({ ...prev, channels }));
-  };
+  const { userId, email: userEmail, login, logout } = useSupabaseStore();
 
-  const [userInfo, setUserInfo] = useState<UserInfo>({
-    id: null,
-    email: NEXT_PUBLIC_TEST_USER_EMAIL,
-    password: "",
-  });
-
-  const isAuthenticated = (info: UserInfo) => info.id !== null;
+  const [loginEmail, setLoginEmail] = useState(NEXT_PUBLIC_TEST_USER_EMAIL);
+  const [loginPassword, setLoginPassword] = useState("");
 
   const [pgForm, setPgForm] = useState<PgForm>({
     schema: "public",
@@ -129,203 +77,70 @@ export default function Home() {
     clear: clearPresenceState,
   } = usePresenceState();
 
-  // Initialize socket and supabase client
+  // Initialize stores once on mount
   useEffect(() => {
-    window.socket = new RealtimeClient(NEXT_PUBLIC_REALTIME_URL, {
-      params: { apikey: NEXT_PUBLIC_SUPABASE_KEY },
-      worker: true,
-      logger: addLog,
-    });
-
-    window.supabase = createClient(
-      NEXT_PUBLIC_SUPABASE_URL,
-      NEXT_PUBLIC_SUPABASE_KEY,
-    );
-
-    return () => {
-      if (window.socket) window.socket.disconnect();
-    };
+    useRealtimeStore.getState().init(addLog);
+    useSupabaseStore.getState().init();
+    return () => useRealtimeStore.getState().destroy();
   }, [addLog]);
 
-  // Monitor WebSocket connection status
+  // Poll connection status
   useEffect(() => {
-    if (!window.socket) return;
-
-    const updateStatus = () => {
-      let status: SocketInfo["status"] = "closed";
-      if (window.socket.isConnecting()) status = "connecting";
-      else if (window.socket.isConnected()) status = "open";
-      else if (window.socket.isDisconnecting()) status = "closing";
-      setSocketInfo((prev) => ({ ...prev, status }));
-    };
-
-    const interval = setInterval(updateStatus, 500);
-    updateStatus();
+    const interval = setInterval(
+      () => useRealtimeStore.getState().syncStatus(),
+      500,
+    );
+    useRealtimeStore.getState().syncStatus();
     return () => clearInterval(interval);
   }, []);
 
-  // Authentication
+  // ---------------------------------------------------------------------------
+  // Auth
+  // ---------------------------------------------------------------------------
+
   const handleLogin = async () => {
-    if (!userInfo.email || !userInfo.password) {
+    if (!loginEmail || !loginPassword) {
       toast.warning("Please enter both email and password");
       return;
     }
-
-    const { data, error } = await window.supabase.auth.signInWithPassword({
-      email: userInfo.email,
-      password: userInfo.password,
-    });
-
-    if (error) {
-      toast.error(`Login failed: ${error.message}`);
-      return;
-    }
-
-    if (data?.session) {
-      await window.socket.setAuth(data.session.access_token);
-    }
-
-    setUserInfo((prev) => ({ ...prev, id: data.user.id }));
-    updateChannels();
+    await login(loginEmail, loginPassword);
   };
 
   const handleLogout = async () => {
-    await window.supabase.auth.signOut();
-    setUserInfo((prev) => ({ ...prev, id: null, email: "", password: "" }));
-    window.socket.setAuth(NEXT_PUBLIC_SUPABASE_KEY);
-    updateChannels();
+    await logout();
+    setLoginEmail("");
+    setLoginPassword("");
   };
 
-  // Connection management
-  const toggleConnection = () => {
-    if (socketInfo.status === "open") {
-      window.socket.disconnect();
-    } else {
-      window.socket.connect();
-    }
+  // ---------------------------------------------------------------------------
+  // Listener registration (bridges store channels → React hook state)
+  // ---------------------------------------------------------------------------
+
+  const addBroadcastListener = (name: string, event: string) => {
+    const ch = useRealtimeStore.getState().channels.get(name);
+    if (!ch) return;
+    registerBroadcastListener(ch, name, event);
+    useRealtimeStore.getState().syncChannels();
   };
 
-  // Channel management
-  const createChannel = ({ name, config }: ChannelFormValues) => {
-    if (socketInfo.channels.has(name)) {
-      toast.warning(`Channel "${name}" already exists`);
-      return;
-    }
-
-    const ch = window.socket.channel(name, { config });
-    window.channel = ch;
-
-    ch.on("system", {}, (payload) => {
-      const message = `[SYSTEM] ${payload.message}`;
-      switch (payload.status) {
-        case "ok":
-          toast.success(message);
-          break;
-        case "error":
-          toast.error(message);
-          break;
-        default:
-          toast.error(message);
-      }
-    });
-
-    updateChannels();
-  };
-
-  const addBroadcastListener = (
-    channel: RealtimeChannel,
-    channelNameParam: string,
-    event: string,
-  ) => {
-    registerBroadcastListener(channel, channelNameParam, event);
-    updateChannels();
-  };
-
-  const addPresenceListener = (
-    channel: RealtimeChannel,
-    channelNameParam: string,
-  ) => {
-    registerPresenceListener(channel, channelNameParam);
-    updateChannels();
+  const addPresenceListener = (name: string) => {
+    const ch = useRealtimeStore.getState().channels.get(name);
+    if (!ch) return;
+    registerPresenceListener(ch, name);
+    useRealtimeStore.getState().syncChannels();
   };
 
   const addPostgresChangesListener = (
-    channel: RealtimeChannel,
-    channelNameParam: string,
+    name: string,
     event: REALTIME_POSTGRES_CHANGES_LISTEN_EVENT,
     schema: string,
     table: string,
   ) => {
-    registerPostgresListener(channel, channelNameParam, event, schema, table);
-    updateChannels();
+    const ch = useRealtimeStore.getState().channels.get(name);
+    if (!ch) return;
+    registerPostgresListener(ch, name, event, schema, table);
+    useRealtimeStore.getState().syncChannels();
   };
-
-  const subscribeToChannel = (
-    name: string,
-    trackPayload?: Record<string, unknown>,
-  ) => {
-    const channel = socketInfo.channels.get(name);
-    if (!channel) {
-      toast.error(`[SUBSCRIBE] Channel ${name} not found`);
-      return;
-    }
-
-    channel.subscribe((status, err) => {
-      if (!err && status === "SUBSCRIBED" && trackPayload) {
-        channel.track(trackPayload).catch((e: Error) => {
-          toast.error(`[TRACK] Error tracking presence: ${e.message}`);
-        });
-      }
-      if (err) {
-        toast.error(
-          `[SUBSCRIBE] Error subscribing to channel ${name}: ${err.message}`,
-        );
-      }
-      updateChannels();
-    });
-  };
-
-  const unsubscribeFromChannel = (name: string) => {
-    const channel = socketInfo.channels.get(name);
-    if (!channel) {
-      toast.error(`[UNSUBSCRIBE] Channel ${name} not found`);
-      return;
-    }
-    channel.unsubscribe();
-    updateChannels();
-  };
-
-  const removeChannel = (name: string) => {
-    const channel = socketInfo.channels.get(name);
-    if (!channel) {
-      toast.error(`[REMOVE] Channel ${name} not found`);
-      return;
-    }
-    channel.unsubscribe();
-    updateChannels();
-  };
-
-  const trackPresence = (name: string) => {
-    const channel = socketInfo.channels.get(name);
-    if (!channel) {
-      toast.error(`[TRACK_PRESENCE] Channel ${name} not found`);
-      return;
-    }
-    channel.track(presencePayload);
-  };
-
-  const untrackPresence = (name: string) => {
-    const channel = socketInfo.channels.get(name);
-    if (!channel) {
-      toast.error(`[UNTRACK_PRESENCE] Channel ${name} not found`);
-      return;
-    }
-    channel.untrack();
-  };
-
-  const subscribedChannels = Array.from(socketInfo.channels.entries()).filter(
-    ([, ch]) => ch.state === "joined",
-  );
 
   // ---------------------------------------------------------------------------
   // Render
@@ -354,21 +169,24 @@ export default function Home() {
                 <div className="flex items-center gap-2">
                   <span
                     className={`inline-block w-3 h-3 rounded-full ${
-                      socketInfo.status === "open"
+                      status === "open"
                         ? "bg-green-500"
-                        : socketInfo.status === "connecting"
+                        : status === "connecting"
                           ? "bg-yellow-500"
                           : "bg-red-500"
                     }`}
                   />
-                  <span className="uppercase font-semibold">
-                    {socketInfo.status}
-                  </span>
+                  <span className="uppercase font-semibold">{status}</span>
                 </div>
-                <Button className="w-full" onClick={toggleConnection}>
-                  {socketInfo.status === "open"
-                    ? "Disconnect Socket"
-                    : "Connect Socket"}
+                <Button
+                  className="w-full"
+                  onClick={() =>
+                    status === "open"
+                      ? useRealtimeStore.getState().disconnect()
+                      : useRealtimeStore.getState().connect()
+                  }
+                >
+                  {status === "open" ? "Disconnect Socket" : "Connect Socket"}
                 </Button>
               </CardContent>
             </Card>
@@ -379,7 +197,7 @@ export default function Home() {
                 <CardTitle className="text-base">User Authentication</CardTitle>
               </CardHeader>
               <CardContent>
-                {!isAuthenticated(userInfo) ? (
+                {!userId ? (
                   <div className="space-y-3">
                     <div className="space-y-1">
                       <Label htmlFor="email">Email</Label>
@@ -387,13 +205,8 @@ export default function Home() {
                         id="email"
                         type="email"
                         placeholder="user@example.com"
-                        value={userInfo.email}
-                        onChange={(e) =>
-                          setUserInfo((prev) => ({
-                            ...prev,
-                            email: e.target.value,
-                          }))
-                        }
+                        value={loginEmail}
+                        onChange={(e) => setLoginEmail(e.target.value)}
                       />
                     </div>
                     <div className="space-y-1">
@@ -402,13 +215,8 @@ export default function Home() {
                         id="password"
                         type="password"
                         placeholder="Enter password"
-                        value={userInfo.password}
-                        onChange={(e) =>
-                          setUserInfo((prev) => ({
-                            ...prev,
-                            password: e.target.value,
-                          }))
-                        }
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
                       />
                     </div>
                     <Button className="w-full" onClick={handleLogin}>
@@ -426,12 +234,11 @@ export default function Home() {
                         ✓ Authenticated
                       </p>
                       <p className="text-xs text-muted-foreground break-all">
-                        <span className="font-semibold">User ID:</span>{" "}
-                        {userInfo.id}
+                        <span className="font-semibold">User ID:</span> {userId}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         <span className="font-semibold">Email:</span>{" "}
-                        {userInfo.email}
+                        {userEmail}
                       </p>
                     </div>
                     <Button
@@ -446,16 +253,15 @@ export default function Home() {
               </CardContent>
             </Card>
 
-            <ChannelForm onSubmit={createChannel} />
+            <ChannelForm
+              onSubmit={({ name, config }: ChannelFormValues) =>
+                useRealtimeStore.getState().createChannel(name, config)
+              }
+            />
 
             <ActiveChannels
-              channels={socketInfo.channels}
-              onSubscribe={subscribeToChannel}
-              onUnsubscribe={unsubscribeFromChannel}
-              onRemove={removeChannel}
               onAddBroadcastListener={addBroadcastListener}
               onAddPresenceListener={addPresenceListener}
-              onUntrack={untrackPresence}
             />
 
             {/* Postgres Changes Config */}
@@ -504,33 +310,30 @@ export default function Home() {
                   </Select>
                 </div>
                 <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {socketInfo.channels.size === 0 ? (
+                  {channels.size === 0 ? (
                     <div className="text-center py-3 border border-dashed rounded-md">
                       <p className="text-muted-foreground text-xs">
                         No channels
                       </p>
                     </div>
                   ) : (
-                    Array.from(socketInfo.channels.entries()).map(
-                      ([key, channel]) => (
-                        <Button
-                          key={key}
-                          className="w-full justify-start text-xs"
-                          variant="secondary"
-                          onClick={() =>
-                            addPostgresChangesListener(
-                              channel,
-                              key,
-                              pgForm.event as REALTIME_POSTGRES_CHANGES_LISTEN_EVENT,
-                              pgForm.schema,
-                              pgForm.table,
-                            )
-                          }
-                        >
-                          Postgres Changes to: {key}
-                        </Button>
-                      ),
-                    )
+                    Array.from(channels.entries()).map(([key]) => (
+                      <Button
+                        key={key}
+                        className="w-full justify-start text-xs"
+                        variant="secondary"
+                        onClick={() =>
+                          addPostgresChangesListener(
+                            key,
+                            pgForm.event as REALTIME_POSTGRES_CHANGES_LISTEN_EVENT,
+                            pgForm.schema,
+                            pgForm.table,
+                          )
+                        }
+                      >
+                        Postgres Changes to: {key}
+                      </Button>
+                    ))
                   )}
                 </div>
               </CardContent>
@@ -559,7 +362,8 @@ export default function Home() {
                   />
                 </div>
                 <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {subscribedChannels.length === 0 ? (
+                  {useRealtimeStore.getState().subscribedChannels().length ===
+                  0 ? (
                     <div className="text-center py-3 border border-dashed rounded-md">
                       <p className="text-muted-foreground text-xs">
                         No subscribed channels
@@ -569,16 +373,23 @@ export default function Home() {
                       </p>
                     </div>
                   ) : (
-                    subscribedChannels.map(([key]) => (
-                      <Button
-                        key={key}
-                        className="w-full justify-start text-xs"
-                        variant="secondary"
-                        onClick={() => trackPresence(key)}
-                      >
-                        👥 Track to: {key}
-                      </Button>
-                    ))
+                    useRealtimeStore
+                      .getState()
+                      .subscribedChannels()
+                      .map(([key]) => (
+                        <Button
+                          key={key}
+                          className="w-full justify-start text-xs"
+                          variant="secondary"
+                          onClick={() =>
+                            useRealtimeStore
+                              .getState()
+                              .trackPresence(key, presencePayload)
+                          }
+                        >
+                          👥 Track to: {key}
+                        </Button>
+                      ))
                   )}
                 </div>
               </CardContent>
@@ -593,7 +404,6 @@ export default function Home() {
             <BroadcastMessagesTable
               messages={broadcastMessages}
               onClear={clearBroadcastMessages}
-              channels={subscribedChannels.map(([key]) => key)}
             />
             <PostgresChangesTable
               changes={postgresChanges}

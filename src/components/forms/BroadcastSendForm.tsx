@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { useForm, useWatch, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -16,12 +17,19 @@ import {
   broadcastSendSchema,
   type BroadcastSendValues,
 } from "@/schemas/channel";
+import { useRealtimeStore } from "@/store/realtimeStore";
 
-interface Props {
-  channels: string[];
-}
+export function BroadcastSendForm() {
+  const channels = useRealtimeStore((s) => s.channels);
 
-export function BroadcastSendForm({ channels }: Props) {
+  const subscribedTopics = useMemo(
+    () =>
+      Array.from(channels.entries())
+        .filter(([, ch]) => ch.state === "joined")
+        .map(([topic]) => topic),
+    [channels],
+  );
+
   const form = useForm<BroadcastSendValues>({
     resolver: zodResolver(broadcastSendSchema),
     defaultValues: { event: "message", channel: "", message: "" },
@@ -30,16 +38,12 @@ export function BroadcastSendForm({ channels }: Props) {
   const selectedChannel = useWatch({ control: form.control, name: "channel" });
 
   const handleSubmit = form.handleSubmit(({ event, channel, message }) => {
-    const ch = window.socket.getChannels().find((c) => c.subTopic === channel);
+    const ch = useRealtimeStore.getState().channels.get(channel);
     if (!ch) {
       toast.error(`[BROADCAST] Channel "${channel}" not found`);
       return;
     }
-    ch.send({
-      type: "broadcast",
-      event,
-      payload: { message },
-    });
+    ch.send({ type: "broadcast", event, payload: { message } });
     form.reset({ event: form.getValues("event"), channel, message: "" });
   });
 
@@ -59,9 +63,9 @@ export function BroadcastSendForm({ channels }: Props) {
               <SelectValue placeholder="channel" />
             </SelectTrigger>
             <SelectContent>
-              {channels.map((ch) => (
-                <SelectItem key={ch} value={ch} className="text-xs">
-                  {ch}
+              {subscribedTopics.map((topic) => (
+                <SelectItem key={topic} value={topic} className="text-xs">
+                  {topic}
                 </SelectItem>
               ))}
             </SelectContent>
