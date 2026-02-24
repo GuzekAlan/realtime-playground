@@ -1,14 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import type { LogEntry } from "@/types/realtime";
 
 interface Props {
@@ -44,44 +36,31 @@ export function LogsTable({ logs, onClear }: Props) {
             No logs yet
           </p>
         ) : (
-          <div className="overflow-auto max-h-96">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs w-20">Time</TableHead>
-                  <TableHead className="text-xs w-24">Kind</TableHead>
-                  <TableHead className="text-xs w-40">Message</TableHead>
-                  <TableHead className="text-xs">Data</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {logs.map((log, idx) => (
-                  <TableRow key={idx}>
-                    <TableCell className="text-xs whitespace-nowrap align-top tabular-nums text-muted-foreground">
-                      {new Date(log.timestamp).toLocaleTimeString()}
-                    </TableCell>
-                    <TableCell className="text-xs align-top">
-                      <Badge variant="outline" className="text-xs font-mono">
-                        {log.kind}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs align-top text-muted-foreground">
-                      {log.message}
-                    </TableCell>
-                    <TableCell className="text-xs align-top">
-                      {log.data !== undefined ? (
-                        <pre className="overflow-x-auto text-muted-foreground">
-                          {JSON.stringify(log.data, null, 2)}
-                        </pre>
-                      ) : (
-                        <span className="text-muted-foreground/40">—</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+          <ul className="overflow-auto max-h-96 space-y-2">
+            {logs.map((log, idx) => (
+              <li
+                key={idx}
+                className="rounded-md border border-border px-3 py-2 text-xs space-y-1"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="tabular-nums text-muted-foreground whitespace-nowrap">
+                    {new Date(log.timestamp).toLocaleTimeString()}
+                  </span>
+                  <Badge variant="outline" className="text-xs font-mono">
+                    {log.kind}
+                  </Badge>
+                  <span className="text-muted-foreground break-all">
+                    {log.message}
+                  </span>
+                </div>
+                {log.data !== undefined && (
+                  <pre className="text-muted-foreground whitespace-pre-wrap break-all">
+                    {JSON.stringify(log.data, null, 2)}
+                  </pre>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
       </CardContent>
     </Card>
