@@ -1,11 +1,8 @@
 import { create } from "zustand";
 import { RealtimeClient, RealtimeChannel } from "@supabase/supabase-js";
 import { toast } from "sonner";
-import {
-  NEXT_PUBLIC_REALTIME_URL,
-  NEXT_PUBLIC_SUPABASE_KEY,
-} from "@/lib/constants";
 import type { ChannelConfig } from "@/schemas/channel";
+import type { RealtimeClientFormValues } from "@/schemas/realtimeClient";
 
 export type SocketStatus = "closed" | "connecting" | "open" | "closing";
 
@@ -14,10 +11,11 @@ type Logger = (kind: string, msg: string, data: any) => void;
 
 interface RealtimeStore {
   client: RealtimeClient | null;
+  socketConfig: RealtimeClientFormValues | null;
   status: SocketStatus;
   channels: Map<string, RealtimeChannel>;
 
-  init: (logger?: Logger) => void;
+  create: (config: RealtimeClientFormValues, logger?: Logger) => void;
   destroy: () => void;
   syncStatus: () => void;
   syncChannels: () => void;
@@ -38,15 +36,26 @@ interface RealtimeStore {
 
 export const useRealtimeStore = create<RealtimeStore>((set, get) => ({
   client: null,
+  socketConfig: null,
   status: "closed",
   channels: new Map(),
 
-  init(logger) {
+  create(config, logger) {
     get().client?.disconnect();
+    const timeout = config.timeout ? parseInt(config.timeout) : undefined;
+    const heartbeatIntervalMs = config.heartbeatIntervalMs
+      ? parseInt(config.heartbeatIntervalMs)
+      : undefined;
     set({
-      client: new RealtimeClient(NEXT_PUBLIC_REALTIME_URL, {
-        params: { apikey: NEXT_PUBLIC_SUPABASE_KEY },
-        worker: true,
+      socketConfig: config,
+      client: new RealtimeClient(config.url, {
+        params: {
+          apikey: config.apiKey,
+          ...(config.vsn ? { vsn: config.vsn } : {}),
+        },
+        worker: config.worker,
+        ...(timeout !== undefined ? { timeout } : {}),
+        ...(heartbeatIntervalMs !== undefined ? { heartbeatIntervalMs } : {}),
         logger,
       }),
     });
@@ -54,7 +63,7 @@ export const useRealtimeStore = create<RealtimeStore>((set, get) => ({
 
   destroy() {
     get().client?.disconnect();
-    set({ client: null, status: "closed", channels: new Map() });
+    set({ client: null, socketConfig: null, status: "closed", channels: new Map() });
   },
 
   syncStatus() {

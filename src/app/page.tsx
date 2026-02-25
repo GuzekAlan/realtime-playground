@@ -17,8 +17,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ChannelForm } from "@/components/forms/ChannelForm";
+import { RealtimeClientForm } from "@/components/forms/RealtimeClientForm";
 import { ActiveChannels } from "@/components/channels/ActiveChannels";
 import { type ChannelFormValues } from "@/schemas/channel";
+import { type RealtimeClientFormValues } from "@/schemas/realtimeClient";
 import { useBroadcastMessages } from "@/hooks/useBroadcastMessages";
 import { useLogMessages } from "@/hooks/useLogMessages";
 import { usePostgresChanges } from "@/hooks/usePostgresChanges";
@@ -41,6 +43,7 @@ interface PgForm {
 export default function Home() {
   const status = useRealtimeStore((s) => s.status);
   const channels = useRealtimeStore((s) => s.channels);
+  const socketConfig = useRealtimeStore((s) => s.socketConfig);
 
   const { userId, email: userEmail, login, logout } = useSupabaseStore();
 
@@ -79,10 +82,17 @@ export default function Home() {
 
   // Initialize stores once on mount
   useEffect(() => {
-    useRealtimeStore.getState().init(addLog);
     useSupabaseStore.getState().init();
     return () => useRealtimeStore.getState().destroy();
-  }, [addLog]);
+  }, []);
+
+  const handleCreateClient = (config: RealtimeClientFormValues) => {
+    useRealtimeStore.getState().create(config, addLog);
+  };
+
+  const handleDeleteSocket = () => {
+    useRealtimeStore.getState().destroy();
+  };
 
   // Poll connection status
   useEffect(() => {
@@ -158,38 +168,15 @@ export default function Home() {
           {/* Left Column: Controls                                            */}
           {/* ---------------------------------------------------------------- */}
           <div className="space-y-4">
-            {/* WebSocket Connection */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">
-                  WebSocket Connection
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <span
-                    className={`inline-block w-3 h-3 rounded-full ${
-                      status === "open"
-                        ? "bg-green-500"
-                        : status === "connecting"
-                          ? "bg-yellow-500"
-                          : "bg-red-500"
-                    }`}
-                  />
-                  <span className="uppercase font-semibold">{status}</span>
-                </div>
-                <Button
-                  className="w-full"
-                  onClick={() =>
-                    status === "open"
-                      ? useRealtimeStore.getState().disconnect()
-                      : useRealtimeStore.getState().connect()
-                  }
-                >
-                  {status === "open" ? "Disconnect Socket" : "Connect Socket"}
-                </Button>
-              </CardContent>
-            </Card>
+            {/* Realtime Client */}
+            <RealtimeClientForm
+              onSubmit={handleCreateClient}
+              onDelete={handleDeleteSocket}
+              onConnect={() => useRealtimeStore.getState().connect()}
+              onDisconnect={() => useRealtimeStore.getState().disconnect()}
+              disabled={!!socketConfig}
+              status={status}
+            />
 
             {/* User Authentication */}
             <Card>
@@ -357,6 +344,7 @@ export default function Home() {
                         setPresencePayload(JSON.parse(e.target.value));
                       } catch {
                         // Allow typing invalid JSON temporarily
+                        toast.error("Invalid JSON format");
                       }
                     }}
                   />
